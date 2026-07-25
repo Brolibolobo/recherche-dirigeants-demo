@@ -21,6 +21,22 @@ test('la requête utilise le code APE précis et exclut les finances/CA', () => 
   assert.equal(buildSearchUrl({ page: 1, filters: { nafCode: '81.21Z' } }).includes('activite_principale=81.21Z'), true);
 });
 
+test('plusieurs codes APE sont joints par virgules et remplacent le filtre secteur', () => {
+  const params = buildSearchParams({
+    filters: { nafCodes: ['81.21Z', '81.22Z'], sectors: ['C'] },
+  });
+
+  assert.equal(params.get('activite_principale'), '81.21Z,81.22Z');
+  assert.equal(params.has('section_activite_principale'), false);
+});
+
+test('les secteurs servent de recherche large quand aucun APE nest choisi', () => {
+  const params = buildSearchParams({ filters: { nafCodes: [], sectors: ['C', 'N'] } });
+
+  assert.equal(params.has('activite_principale'), false);
+  assert.equal(params.get('section_activite_principale'), 'C,N');
+});
+
 test('le client reste sous la limite officielle de 7 appels/s', () => {
   assert.equal(RATE_LIMIT_PER_SECOND, 6);
 });

@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import {
   parseGeo,
   parseNafCode,
+  parseNafCodes,
+  validateFilterInputs,
   clampMaxRows,
   findActiveMatchingEstablishment,
   buildReferenceRow,
+  buildReferenceRows,
 } from '../src/filters.js';
 
 const company = {
@@ -49,9 +52,32 @@ test('parseNafCode extrait un code APE depuis la liste dédiée', () => {
   assert.throws(() => parseNafCode('ménage'), /Code APE invalide/);
 });
 
+test('parseNafCodes accepte plusieurs APE et supprime les doublons', () => {
+  assert.deepEqual(parseNafCodes([
+    '81.21Z — Nettoyage courant des bâtiments',
+    '81.22Z — Autres activités de nettoyage des bâtiments',
+    '81.21Z',
+  ]), ['81.21Z', '81.22Z']);
+});
+
+test('validateFilterInputs refuse les sélections et plages incohérentes', () => {
+  assert.throws(
+    () => validateFilterInputs({ nafCodes: [], sectors: [], staffMin: 3, staffMax: 500, ageMin: 25, ageMax: 75 }),
+    /code APE ou un secteur/,
+  );
+  assert.throws(
+    () => validateFilterInputs({ nafCodes: ['81.21Z'], sectors: [], staffMin: 500, staffMax: 3, ageMin: 25, ageMax: 75 }),
+    /effectif minimum/,
+  );
+  assert.throws(
+    () => validateFilterInputs({ nafCodes: ['81.21Z'], sectors: [], staffMin: 3, staffMax: 500, ageMin: 75, ageMax: 25 }),
+    /âge minimum/,
+  );
+});
+
 test('clampMaxRows borne la taille du résultat', () => {
   assert.equal(clampMaxRows('25'), 25);
-  assert.equal(clampMaxRows('99999'), 1000);
+  assert.equal(clampMaxRows('99999'), 100);
   assert.equal(clampMaxRows('0'), 1);
 });
 
@@ -83,4 +109,18 @@ test('buildReferenceRow expose APE et indice de personne morale sans chiffre d�
   assert.match(row.groupement_capitalistique_indice, /pas une preuve d'actionnariat/i);
   assert.equal('ca' in row, false);
   assert.equal('chiffre_affaires' in row, false);
+});
+
+test('buildReferenceRows produit un lead par dirigeant physique éligible', () => {
+  const rows = buildReferenceRows({
+    ...company,
+    dirigeants: [
+      ...company.dirigeants,
+      { type_dirigeant: 'personne physique', prenoms: 'BOB', nom: 'MARTIN', qualite: 'Gérant', date_de_naissance: '1988-09-12' },
+      { type_dirigeant: 'personne physique', prenoms: 'CAMILLE', nom: 'AUDIT', qualite: 'Commissaire aux comptes', date_de_naissance: '1980-01-01' },
+    ],
+  }, { ageMin: 18, ageMax: 100 });
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map(row => row.dirigeant_nom), ['ALICE DUPONT', 'BOB MARTIN']);
 });
