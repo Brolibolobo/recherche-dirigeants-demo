@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseGeo,
+  geoParamsForZones,
   parseNafCode,
   parseNafCodes,
   validateFilterInputs,
@@ -9,6 +10,7 @@ import {
   findActiveMatchingEstablishment,
   buildReferenceRow,
   buildReferenceRows,
+  referenceRowMatchesFilters,
 } from '../src/filters.js';
 
 const company = {
@@ -44,6 +46,16 @@ test('parseGeo distingue département, code postal et région', () => {
   assert.deepEqual(parseGeo('75001'), { code_postal: '75001' });
   assert.deepEqual(parseGeo('region:11'), { region: '11' });
   assert.throws(() => parseGeo('Paris'), /Zone invalide/);
+});
+
+test('les zones lisibles développent les régions en départements et restent en OU', () => {
+  assert.deepEqual(geoParamsForZones([
+    { type: 'departement', code: '75', label: 'Paris (75)' },
+    { type: 'region', code: '11', label: 'Île-de-France' },
+    { type: 'departement', code: '75', label: 'Paris (75)' },
+  ]), {
+    departement: '75,77,78,91,92,93,94,95',
+  });
 });
 
 test('parseNafCode extrait un code APE depuis la liste dédiée', () => {
@@ -123,4 +135,47 @@ test('buildReferenceRows produit un lead par dirigeant physique éligible', () =
 
   assert.equal(rows.length, 2);
   assert.deepEqual(rows.map(row => row.dirigeant_nom), ['ALICE DUPONT', 'BOB MARTIN']);
+});
+
+test('l’historique applique activité, zone, effectif, forme, âge et recherche rapide', () => {
+  const row = buildReferenceRow(company, {
+    matchedEstablishment: findActiveMatchingEstablishment(company),
+    apeLabel: 'Nettoyage courant des bâtiments',
+    ageMin: 18,
+    ageMax: 100,
+  });
+  const filters = {
+    nafCodes: ['81.21Z'], sectors: [], staffCodes: ['11'], legal: ['sas'],
+    ageMin: 18, ageMax: 100,
+    zones: [{ type: 'region', code: '11', label: 'Île-de-France' }],
+  };
+  assert.equal(referenceRowMatchesFilters(row, filters, 'Alice nettoyage'), true);
+  assert.equal(referenceRowMatchesFilters(row, filters, 'Martin'), false);
+  assert.equal(referenceRowMatchesFilters(row, { ...filters, zones: [{ type: 'departement', code: '69' }] }, ''), false);
+  assert.equal(referenceRowMatchesFilters(row, { ...filters, nafCodes: ['62.01Z'] }, ''), false);
+});
+
+test('les codes postaux corses distinguent Corse-du-Sud et Haute-Corse', () => {
+  const base = {
+    code_ape: '81.21Z', secteur: 'N', tranche_effectif: '11', nature_juridique: '5710', dirigeant_age: 40,
+  };
+  const filters = { nafCodes: ['81.21Z'], staffCodes: ['11'], legal: ['sas'], ageMin: 18, ageMax: 100 };
+  const south = { ...base, code_postal_siege: '20000' };
+  const north = { ...base, code_postal_siege: '20200' };
+  assert.equal(referenceRowMatchesFilters(south, { ...filters, zones: [{ type: 'departement', code: '2A' }] }), true);
+  assert.equal(referenceRowMatchesFilters(south, { ...filters, zones: [{ type: 'departement', code: '2B' }] }), false);
+  assert.equal(referenceRowMatchesFilters(north, { ...filters, zones: [{ type: 'departement', code: '2A' }] }), false);
+  assert.equal(referenceRowMatchesFilters(north, { ...filters, zones: [{ type: 'departement', code: '2B' }] }), true);
+});
+
+test('le filtre géographique accepte le siège même si un établissement de zone différent est stocké', () => {
+  const row = {
+    code_ape: '81.21Z', secteur: 'N', tranche_effectif: '11', nature_juridique: '5710', dirigeant_age: 40,
+    code_postal_etablissement_zone: '69001', code_postal_siege: '75001',
+  };
+  const filters = {
+    nafCodes: ['81.21Z'], staffCodes: ['11'], legal: ['sas'], ageMin: 25, ageMax: 75,
+    zones: [{ type: 'departement', code: '75', label: 'Paris (75)' }],
+  };
+  assert.equal(referenceRowMatchesFilters(row, filters), true);
 });

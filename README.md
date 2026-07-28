@@ -6,7 +6,7 @@ Application française compatible avec GitHub Pages. Elle interroge l’[API Rec
 
 - sélection de plusieurs codes NAF/APE, combinés en logique **OU** ;
 - secteur large utilisé uniquement lorsqu’aucun APE précis n’est sélectionné ;
-- zone par département (`75`), code postal (`75001`) ou région (`region:11`) ; seuls les établissements actifs correspondants sont gardés ;
+- zones choisies dans des listes lisibles de départements et régions, combinées en logique **OU** ; seuls les établissements actifs correspondants sont gardés ;
 - filtres forme juridique, effectif, âge et limite MVP de 1 à 100 dirigeants ;
 - un résultat par dirigeant physique éligible, même lorsqu’une entreprise en expose plusieurs ;
 - export CSV et copie locale du dernier résultat dans IndexedDB ;
@@ -28,6 +28,8 @@ Quand `src/central-config.js` contient l’URL Supabase et la clé publique du p
 7. si l’API publique tombe, les pages déjà en cache restent exploitables et le résultat peut être marqué partiel.
 
 Le MVP utilise volontairement un unique workspace public défini par `PUBLIC_WORKSPACE_ID` : tous les collègues qui utilisent ce déploiement partagent donc le même registre anti-doublons. Le schéma contient aussi `workspace_members` et `created_by` pour raccorder Supabase Auth plus tard. Il ne fournit pas encore de sélection multi-workspace côté navigateur. Les tables ne sont pas accessibles directement par les rôles `anon` ou `authenticated` : l’Edge Function utilise la clé `service_role`, qui ne doit jamais arriver dans le navigateur.
+
+Le mode historique est lui aussi public pour ce MVP, borné et limité en mémoire par instance Edge. Il expose la sélection de dirigeants administratifs déjà livrés dans le workspace partagé : aucune donnée privée ou enrichie ne doit y être ajoutée sans authentification.
 
 L’empreinte anti-doublon `person:v2` est basée sur les prénoms, le nom et l’année de naissance normalisés. Une date complète, `YYYY-MM` et une année seule convergent volontairement vers la même clé. La qualité de la source reste enregistrée comme `strong`, `medium` ou `weak`. Le SIREN et la nationalité n’entrent pas dans l’identité. En plus de la clé exacte, le registre conserve un hash des noms et l’année séparément : une identité sans année bloque et est bloquée par toute identité du même nom, tandis que deux homonymes ayant des années connues différentes restent distincts. Ce choix conservateur évite la réapparition quand la précision de naissance change, au prix d’un risque de fusion lorsque l’année manque. Ce mécanisme reste une heuristique administrative, pas une identité civile certifiée. Le sel `DIRECTOR_FINGERPRINT_SALT` ne doit pas changer sans migration des empreintes existantes.
 

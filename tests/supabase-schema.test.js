@@ -34,8 +34,32 @@ test('l’Edge Function garde la clé privilégiée côté serveur', async () =>
   assert.match(source, /sleepWithLease/);
   assert.match(source, /MAX_RETRY_WAIT_MS = 60_000/);
   assert.match(source, /personNameKey/);
+  assert.match(source, /reserveStoredLeads/);
+  assert.match(source, /mode === 'history'/);
+  assert.match(source, /workspace_lead_deliveries/);
   assert.doesNotMatch(source, /Math\.min\(retryAfterDelay/);
   assert.doesNotMatch(source, /service_role\s*[:=]\s*["'][A-Za-z0-9._-]+["']/i);
+});
+
+test('l’historique reste en lecture seule et les lectures stockées ne sont pas plafonnées silencieusement', async () => {
+  const source = await readFile(new URL('../supabase/functions/scan/index.ts', import.meta.url), 'utf8');
+  const handler = source.indexOf('Deno.serve');
+  const historyBranch = source.indexOf("if (mode === 'history')", handler);
+  const rateLimit = source.indexOf("consume_scan_rate_limit", handler);
+  assert.notEqual(historyBranch, -1);
+  assert.notEqual(rateLimit, -1);
+  assert.ok(historyBranch < rateLimit, 'le mode historique doit retourner avant le rate-limit persistant');
+  assert.doesNotMatch(source, /STORED_SCAN_LIMIT/);
+  assert.match(source, /order\('first_seen_at',[\s\S]*?order\('lead_key',[\s\S]*?first_seen_at\.gt/);
+  assert.match(source, /order\('delivered_at',[\s\S]*?order\('lead_key',[\s\S]*?delivered_at\.lt/);
+  assert.match(source, /reserveStoredLeads\([\s\S]*?scanDeadline[\s\S]*?signal: AbortSignal/);
+  assert.match(source, /readHistory\([\s\S]*?scanDeadline[\s\S]*?signal: AbortSignal/);
+  assert.match(source, /\.lte\('first_seen_at', snapshotTime\)[\s\S]*?\.abortSignal\(boundedSignal\(signal, scanDeadline\)\)/);
+  assert.match(source, /\.lte\('delivered_at', snapshotTime\)[\s\S]*?\.abortSignal\(boundedSignal\(signal, scanDeadline\)\)/);
+  assert.match(source, /reserve_scan_leads[\s\S]*?\.abortSignal\(boundedSignal\(null, scanDeadline\)\)/);
+  assert.match(source, /if \(signal\.aborted\) \{ warning = 'request_aborted'; break; \}/);
+  assert.match(source, /allowHistoryRequest\(request\)[\s\S]*?rate_limited/);
+  assert.match(source, /return \{ rows, warning \}/);
 });
 
 test('GitHub Pages conserve les modules sous _shared', async () => {
@@ -46,4 +70,14 @@ test('le référentiel NAF embarqué par l’Edge Function reste identique au fr
   const frontend = await readFile(new URL('../data/naf-rev2.json', import.meta.url), 'utf8');
   const edge = await readFile(new URL('../supabase/functions/_shared/naf-rev2.json', import.meta.url), 'utf8');
   assert.equal(edge, frontend);
+});
+
+test('la phase API propage abort et deadline avant toute nouvelle réservation', async () => {
+  const source = await readFile(new URL('../supabase/functions/scan/index.ts', import.meta.url), 'utf8');
+  assert.match(source, /async function governmentPage\([\s\S]*?signal: AbortSignal/);
+  assert.match(source, /fetch\([\s\S]*?boundedSignal\(signal, scanDeadline\)/);
+  assert.match(source, /async function getPage\([\s\S]*?signal: AbortSignal/);
+  assert.match(source, /const pageResult = await getPage\([\s\S]*?scanDeadline,[\s\S]*?request\.signal/);
+  assert.match(source, /if \(request\.signal\.aborted\) throw new Error\('request_aborted'\)/);
+  assert.match(source, /p_candidates: candidates[\s\S]*?\.abortSignal\(boundedSignal\(null, scanDeadline\)\)/);
 });

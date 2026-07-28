@@ -1,3 +1,5 @@
+import { REGION_DEPARTMENTS } from './geo-data.js';
+
 export const SECTORS = [['C','Industrie'],['F','Construction'],['G','Commerce'],['H','Transport'],['J','Information / communication'],['K','Finance'],['M','Conseil'],['N','Services'],['Q','Santé']];
 export const LEGALS = [['sas','SAS'],['sarl','SARL'],['sa','SA']];
 export const LEGAL_CODES = { sas: ['5710','5720'], sarl: ['5498','5499'], sa: ['5505','5510','5520','5599'] };
@@ -13,6 +15,18 @@ export function parseGeo(value) {
   throw new Error('Zone invalide : utilisez un département (75), un code postal (75001) ou region:11.');
 }
 
+export function geoParamsForZones(zones = []) {
+  const departments = [];
+  for (const zone of Array.isArray(zones) ? zones : []) {
+    const type = String(zone?.type || '');
+    const code = String(zone?.code || '').toUpperCase();
+    if (type === 'departement' && /^(?:\d{2,3}|2[AB])$/.test(code)) departments.push(code);
+    if (type === 'region') departments.push(...(REGION_DEPARTMENTS[code] || []));
+  }
+  const unique = [...new Set(departments)];
+  return unique.length ? { departement: unique.join(',') } : {};
+}
+
 export function parseNafCode(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -25,8 +39,8 @@ export function parseNafCodes(values) {
   return [...new Set((Array.isArray(values) ? values : [values]).map(parseNafCode).filter(Boolean))];
 }
 
-export function validateFilterInputs({ nafCodes = [], sectors = [], staffMin, staffMax, ageMin, ageMax }) {
-  if (!nafCodes.length && !sectors.length) throw new Error('Choisissez au moins un code APE ou un secteur.');
+export function validateFilterInputs({ nafCodes = [], sectors = [], staffMin, staffMax, ageMin, ageMax }, { allowEmptyActivity = false } = {}) {
+  if (!allowEmptyActivity && !nafCodes.length && !sectors.length) throw new Error('Choisissez au moins un code APE ou un secteur.');
   if (Number(staffMin) > Number(staffMax)) throw new Error("L’effectif minimum doit être inférieur ou égal au maximum.");
   if (Number(ageMin) > Number(ageMax)) throw new Error("L’âge minimum doit être inférieur ou égal au maximum.");
 }
@@ -83,4 +97,50 @@ export function companyIsEligible(company, legalKeys) {
   if (company.siege?.date_fermeture) return false;
   const codes = legalKeys.flatMap(k => LEGAL_CODES[k] || []);
   return codes.some(code => String(company.nature_juridique || '').startsWith(code));
+}
+
+function normalizedSearch(value) {
+  return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function postalDepartments(value) {
+  const postal = String(value || '').replace(/\D/g, '');
+  if (/^97[1-4,6]/.test(postal)) return [postal.slice(0, 3)];
+  if (postal.startsWith('20')) return [Number(postal.slice(0, 5)) < 20200 ? '2A' : '2B'];
+  return postal.length >= 2 ? [postal.slice(0, 2)] : [];
+}
+
+export function referenceRowMatchesFilters(row, filters = {}, query = '') {
+  if (filters.nafCodes?.length && !filters.nafCodes.includes(row?.code_ape)) return false;
+  if (!filters.nafCodes?.length && filters.sectors?.length && !filters.sectors.includes(row?.secteur)) return false;
+  if (filters.staffCodes?.length && !filters.staffCodes.includes(row?.tranche_effectif)) return false;
+  if (filters.legal?.length) {
+    const legalCodes = filters.legal.flatMap(key => LEGAL_CODES[key] || []);
+    if (!legalCodes.some(code => String(row?.nature_juridique || '').startsWith(code))) return false;
+  }
+  const age = Number(row?.dirigeant_age);
+  if (!Number.isFinite(age) || age < Number(filters.ageMin ?? 18) || age > Number(filters.ageMax ?? 100)) return false;
+  const normalizedGeo = filters.geoParams && typeof filters.geoParams === 'object'
+    ? filters.geoParams
+    : geoParamsForZones(filters.zones);
+  const rowPostals = [row?.code_postal_etablissement_zone, row?.code_postal_siege]
+    .map(value => String(value || '').replace(/\D/g, ''))
+    .filter(Boolean);
+  const allowedDepartments = String(normalizedGeo.departement || '').split(',').filter(Boolean);
+  if (normalizedGeo.region) allowedDepartments.push(...(REGION_DEPARTMENTS[String(normalizedGeo.region)] || []));
+  if (allowedDepartments.length) {
+    const rowDepartments = rowPostals.flatMap(postalDepartments);
+    if (!rowDepartments.some(code => allowedDepartments.includes(code))) return false;
+  }
+  const requiredPostal = String(normalizedGeo.code_postal || '').replace(/\D/g, '');
+  if (requiredPostal && !rowPostals.includes(requiredPostal)) return false;
+  const terms = normalizedSearch(query).split(' ').filter(Boolean);
+  if (terms.length) {
+    const haystack = normalizedSearch([
+      row?.dirigeant_nom, row?.nom_entreprise, row?.siren, row?.code_ape, row?.libelle_ape,
+      row?.commune_etablissement_zone, row?.commune_siege,
+    ].join(' '));
+    if (!terms.every(term => haystack.includes(term))) return false;
+  }
+  return true;
 }

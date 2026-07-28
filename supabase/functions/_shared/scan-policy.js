@@ -1,11 +1,13 @@
 import {
   SECTORS,
   LEGALS,
+  geoParamsForZones,
   parseGeo,
   parseNafCodes,
   staffCodes,
   validateFilterInputs,
 } from './filters.js';
+import { DEPARTMENTS, REGIONS } from './geo-data.js';
 
 export const MAX_BODY_BYTES = 16_384;
 export const MAX_SCAN_TARGET = 100;
@@ -20,12 +22,14 @@ const PUBLIC_ERROR_CODES = new Set([
   'invalid_geo',
   'invalid_json',
   'invalid_legal',
+  'invalid_mode',
   'invalid_naf_codes',
   'invalid_request',
   'invalid_sectors',
   'invalid_staff_max',
   'invalid_staff_min',
   'invalid_target',
+  'invalid_zones',
   'method_not_allowed',
   'origin_not_allowed',
   'page_limit_reached',
@@ -37,6 +41,8 @@ const PUBLIC_ERROR_CODES = new Set([
 ]);
 
 const INTERNAL_ERROR_CODES = [
+  ['history_read:', 'history_read_failed'],
+  ['stored_leads:', 'stored_leads_failed'],
   ['reserve_leads:', 'reservation_failed'],
   ['cache_read:', 'cache_read_failed'],
   ['cache_write:', 'cache_write_failed'],
@@ -67,7 +73,7 @@ function strictArray(input, key) {
   return [...new Set(value.map(item => String(item).trim()).filter(Boolean))];
 }
 
-export function sanitizeScanFilters(input = {}) {
+export function sanitizeScanFilters(input = {}, { allowEmptyActivity = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_request');
 
   const rawNafCodes = strictArray(input, 'nafCodes');
@@ -83,7 +89,7 @@ export function sanitizeScanFilters(input = {}) {
   if (rawSectors.some(value => !allowedSectors.has(value))) throw new Error('invalid_sectors');
   const sectors = nafCodes.length
     ? []
-    : (rawSectors.length ? rawSectors : SECTORS.map(pair => pair[0]));
+    : (rawSectors.length ? rawSectors : (allowEmptyActivity ? [] : SECTORS.map(pair => pair[0])));
 
   const allowedLegals = new Set(LEGALS.map(pair => pair[0]));
   const rawLegal = strictArray(input, 'legal');
@@ -98,15 +104,34 @@ export function sanitizeScanFilters(input = {}) {
   if (geo.length > 50) throw new Error('invalid_geo');
 
   let geoParams;
+  let zones = [];
   try {
-    geoParams = parseGeo(geo);
-    validateFilterInputs({ nafCodes, sectors, staffMin, staffMax, ageMin, ageMax });
-  } catch {
+    if (input.zones !== undefined) {
+      if (!Array.isArray(input.zones) || input.zones.length > 30) throw new Error('invalid_zones');
+      const departmentCodes = new Set(DEPARTMENTS.map(([code]) => code));
+      const regionCodes = new Set(REGIONS.map(([code]) => code));
+      zones = input.zones.map(zone => {
+        if (!zone || typeof zone !== 'object' || Array.isArray(zone)) throw new Error('invalid_zones');
+        const type = String(zone.type || '');
+        const code = String(zone.code || '').toUpperCase();
+        if (type === 'departement' && departmentCodes.has(code)) return { type, code };
+        if (type === 'region' && regionCodes.has(code)) return { type, code };
+        throw new Error('invalid_zones');
+      });
+      zones = zones.filter((zone, index) => zones.findIndex(item => item.type === zone.type && item.code === zone.code) === index);
+      geoParams = geoParamsForZones(zones);
+    } else {
+      geoParams = parseGeo(geo);
+    }
+    validateFilterInputs({ nafCodes, sectors, staffMin, staffMax, ageMin, ageMax }, { allowEmptyActivity });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'invalid_zones') throw error;
     throw new Error('invalid_request');
   }
 
   return {
     geo,
+    zones,
     geoParams,
     nafCodes,
     sectors,

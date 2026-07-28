@@ -10,7 +10,7 @@ import {
   sanitizeScanFilters,
   validateUpstreamPayload,
 } from '../supabase/functions/_shared/scan-policy.js';
-import { LEGALS, SECTORS } from '../supabase/functions/_shared/filters.js';
+import { LEGALS, SECTORS, referenceRowMatchesFilters } from '../supabase/functions/_shared/filters.js';
 
 test('la politique MVP borne coût, pages, deadline et corps HTTP', () => {
   assert.equal(MAX_SCAN_TARGET, 100);
@@ -21,11 +21,44 @@ test('la politique MVP borne coût, pages, deadline et corps HTTP', () => {
 
 test('les filtres fournis sont stricts mais une liste juridique vide garde les défauts', () => {
   assert.deepEqual(sanitizeScanFilters({}).sectors, SECTORS.map(([value]) => value));
+  assert.deepEqual(sanitizeScanFilters({}, { allowEmptyActivity: true }).sectors, []);
   assert.deepEqual(sanitizeScanFilters({ sectors: ['C'], legal: [] }).legal, LEGALS.map(([value]) => value));
   assert.throws(() => sanitizeScanFilters({ sectors: ['N'], legal: ['invalide'] }), /invalid_legal/);
   assert.throws(() => sanitizeScanFilters({ sectors: ['invalide'], legal: [] }), /invalid_sectors/);
   const filters = sanitizeScanFilters({ sectors: ['N'], legal: [] });
   assert.ok(filters.legal.length > 1);
+});
+
+test('les zones structurées sont validées puis converties en une liste de départements', () => {
+  const filters = sanitizeScanFilters({
+    sectors: ['N'],
+    zones: [
+      { type: 'departement', code: '75', label: 'texte navigateur ignoré' },
+      { type: 'region', code: '11', label: 'texte navigateur ignoré' },
+    ],
+  });
+  assert.deepEqual(filters.zones, [
+    { type: 'departement', code: '75' },
+    { type: 'region', code: '11' },
+  ]);
+  assert.deepEqual(filters.geoParams, { departement: '75,77,78,91,92,93,94,95' });
+  assert.throws(() => sanitizeScanFilters({ sectors: ['N'], zones: [{ type: 'pays', code: 'FR' }] }), /invalid_zones/);
+});
+
+test('les anciens filtres geo restent appliqués au stock et à l’historique', () => {
+  const base = {
+    code_ape: '81.21Z', secteur: 'N', tranche_effectif: '11', nature_juridique: '5710', dirigeant_age: 40,
+    code_postal_etablissement_zone: '69001', code_postal_siege: '69001',
+  };
+  const department = sanitizeScanFilters({ sectors: ['N'], geo: '75' });
+  const postal = sanitizeScanFilters({ sectors: ['N'], geo: '75001' });
+  const region = sanitizeScanFilters({ sectors: ['N'], geo: 'region:11' });
+
+  assert.equal(referenceRowMatchesFilters(base, department), false);
+  assert.equal(referenceRowMatchesFilters({ ...base, code_postal_siege: '75001' }, department), true);
+  assert.equal(referenceRowMatchesFilters({ ...base, code_postal_siege: '75002' }, postal), false);
+  assert.equal(referenceRowMatchesFilters({ ...base, code_postal_siege: '75001' }, postal), true);
+  assert.equal(referenceRowMatchesFilters({ ...base, code_postal_siege: '92000' }, region), true);
 });
 
 test('le contrat upstream rejette les structures non itérables et pages invalides', () => {
