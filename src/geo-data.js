@@ -1,1 +1,1 @@
-export * from '../supabase/functions/_shared/geo-data.js';
+export * from '../server/lib/geo-data.js';

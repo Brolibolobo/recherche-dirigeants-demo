@@ -52,6 +52,23 @@ test('l’empreinte dirigeant résiste aux accents et à la casse', async () => 
   assert.equal(await leadKey(first, 'test-salt'), await leadKey(second, 'test-salt'));
 });
 
+test('l’identité conserve les lettres non latines et reste stable', async () => {
+  const first = {
+    dirigeant_prenoms: 'Мария',
+    dirigeant_nom_famille: 'Иванова',
+    dirigeant_date_naissance: '1985-04-12',
+  };
+  const second = {
+    ...first,
+    dirigeant_prenoms: 'мария',
+    dirigeant_nom_famille: 'иванова',
+  };
+
+  assert.deepEqual(directorIdentity(first), directorIdentity(second));
+  assert.match(directorFingerprintMaterial(first), /МАРИЯ\|ИВАНОВА/);
+  assert.equal(await leadKey(first, 'test-salt'), await leadKey(second, 'test-salt'));
+});
+
 test('sans naissance, la même personne reste dédupliquée entre deux sociétés', () => {
   const first = { dirigeant_prenoms: 'Jean', dirigeant_nom_famille: 'Martin', siren: '111111111' };
   const second = { ...first, siren: '222222222' };

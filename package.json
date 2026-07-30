@@ -2,7 +2,17 @@
   "name": "recherche-dirigeants-demo",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node scripts/build-static.js",
+    "check": "node --check api/scan.js && node --check server/scan-handler.js && node --check server/node-adapter.js && node --check server/db.js && node --check scripts/build-static.js && node --check scripts/migrate.js && node --check src/app.js",
+    "db:migrate": "node scripts/migrate.js",
+    "test:postgres": "bash scripts/test-postgres.sh"
+  },
+  "dependencies": {
+    "postgres": "3.4.7"
   }
 }

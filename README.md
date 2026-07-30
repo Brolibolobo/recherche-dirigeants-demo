@@ -1,111 +1,74 @@
 # Recherche de dirigeants d’entreprise
 
-Application française compatible avec GitHub Pages. Elle interroge l’[API Recherche d’entreprises](https://recherche-entreprises.api.gouv.fr/), qualifie les dirigeants et exporte les résultats en CSV.
+Application publique statique servie par Vercel. Le navigateur appelle exclusivement la Vercel Function same-origin `POST /api/scan`; celle-ci utilise une base commune Neon Postgres et l’API Recherche d’entreprises.
 
-## Fonctionnalités
+## Garanties
 
-- sélection de plusieurs codes NAF/APE, combinés en logique **OU** ;
-- secteur large utilisé uniquement lorsqu’aucun APE précis n’est sélectionné ;
-- zones choisies dans des listes lisibles de départements et régions, combinées en logique **OU** ; seuls les établissements actifs correspondants sont gardés ;
-- filtres forme juridique, effectif, âge et limite MVP de 1 à 100 dirigeants ;
-- un résultat par dirigeant physique éligible, même lorsqu’une entreprise en expose plusieurs ;
-- export CSV et copie locale du dernier résultat dans IndexedDB ;
-- cache Supabase central optionnel avec anti-doublon atomique par workspace ;
-- cadence globale de l’API amont limitée, reprise HTTP 429 et verrou par page de cache ;
-- aucun champ financier demandé ou exporté ;
-- rendu des champs API via les API DOM, sans injection HTML.
+- cache durable des pages amont et baux de récupération ;
+- cadence et quota globaux persistés en PostgreSQL ;
+- scans, historique commun et ledger anti-doublon atomique ;
+- empreintes salées et `DATABASE_URL` exclusivement côté serveur ;
+- aucune authentification utilisateur pour ce MVP public ;
+- requêtes SQL paramétrées, corps limité à 16 Kio, filtres typés et bornés, origine same-origin stricte et deadline serverless ;
+- pagination keyset du stock et de l’historique, sans plafond silencieux à 500 lignes ;
+- `Retry-After`, retries bornés et renouvellement des leases pendant les attentes amont.
 
-## Cache central et anti-doublons
+L’endpoint est volontairement public. Les rate limits et quotas réduisent l’abus, sans constituer une authentification.
 
-Quand `src/central-config.js` contient l’URL Supabase et la clé publique du projet, le navigateur appelle uniquement l’Edge Function `scan` :
-
-1. la requête API est normalisée et hachée ; l’âge, la forme juridique et la taille demandée ne fragmentent pas inutilement le cache amont ;
-2. chaque page déjà connue est relue depuis `api_cache_pages` sans rafraîchissement automatique ;
-3. les pages absentes sont récupérées une seule fois autant que possible grâce à un bail SQL, puis conservées ;
-4. chaque dirigeant reçoit une empreinte salée côté serveur ;
-5. `reserve_scan_leads` sérialise brièvement les réservations d’un même workspace et compare à la fois la clé exacte et l’alias nom/année avant toute livraison ;
-6. au plus 50 pages sont parcourues pendant 25 secondes pour obtenir jusqu’à 100 inédits ; un budget global partagé limite aussi les appels à l’API amont ;
-7. si l’API publique tombe, les pages déjà en cache restent exploitables et le résultat peut être marqué partiel.
-
-Le MVP utilise volontairement un unique workspace public défini par `PUBLIC_WORKSPACE_ID` : tous les collègues qui utilisent ce déploiement partagent donc le même registre anti-doublons. Le schéma contient aussi `workspace_members` et `created_by` pour raccorder Supabase Auth plus tard. Il ne fournit pas encore de sélection multi-workspace côté navigateur. Les tables ne sont pas accessibles directement par les rôles `anon` ou `authenticated` : l’Edge Function utilise la clé `service_role`, qui ne doit jamais arriver dans le navigateur.
-
-Le mode historique est lui aussi public pour ce MVP, borné et limité en mémoire par instance Edge. Il expose la sélection de dirigeants administratifs déjà livrés dans le workspace partagé : aucune donnée privée ou enrichie ne doit y être ajoutée sans authentification.
-
-L’empreinte anti-doublon `person:v2` est basée sur les prénoms, le nom et l’année de naissance normalisés. Une date complète, `YYYY-MM` et une année seule convergent volontairement vers la même clé. La qualité de la source reste enregistrée comme `strong`, `medium` ou `weak`. Le SIREN et la nationalité n’entrent pas dans l’identité. En plus de la clé exacte, le registre conserve un hash des noms et l’année séparément : une identité sans année bloque et est bloquée par toute identité du même nom, tandis que deux homonymes ayant des années connues différentes restent distincts. Ce choix conservateur évite la réapparition quand la précision de naissance change, au prix d’un risque de fusion lorsque l’année manque. Ce mécanisme reste une heuristique administrative, pas une identité civile certifiée. Le sel `DIRECTOR_FINGERPRINT_SALT` ne doit pas changer sans migration des empreintes existantes.
-
-Si Supabase n’est pas configuré, l’interface affiche explicitement le **mode direct sans anti-doublon partagé**. IndexedDB ne sert alors qu’à recharger le dernier résultat dans le même navigateur.
-
-## Architecture
-
-- `.nojekyll` : garantit que GitHub Pages publie aussi les modules sous `_shared` ;
-- `src/api.js` : paramètres API, cadence et gestion HTTP ;
-- `src/filters.js` : validation, qualification et construction d’un lead par dirigeant ;
-- `src/cache.js` : clé canonique, normalisation d’identité et hachage ;
-- `src/central-api.js` : client navigateur de l’Edge Function ;
-- `src/central-config.js` : configuration publique Supabase, vide par défaut ;
-- `src/storage.js` : secours local IndexedDB du dernier résultat ;
-- `supabase/migrations/` : schéma, RLS, verrous et fonctions SQL atomiques ;
-- `supabase/functions/scan/` : cache central et orchestration d’un scan ;
-- `supabase/tests/` : tests SQL et test de concurrence réelle ;
-- `tests/` : tests Node sans dépendance de production.
-
-## Lancement et tests frontend
+## Installation locale et tests
 
 ```bash
+npm ci
 npm test
-for file in src/*.js; do node --check "$file"; done
-python3 -m http.server 8765
+npm run check
 ```
 
-Ouvrir <http://127.0.0.1:8765>.
+Les tests Node n’utilisent aucune base distante. Ils exercent notamment l’adaptateur Node Vercel, la concurrence sur cache miss, la cadence et les retries, les résultats partiels, les compteurs et les parcours keyset au-delà de 500 lignes.
 
-## Tests Supabase locaux
-
-Docker et le CLI Supabase sont nécessaires :
+Le schéma et les fonctions SQL disposent aussi d’un test comportemental sur un PostgreSQL 16 local jetable (Docker) :
 
 ```bash
-npx supabase start
-npx supabase db reset --local
-docker exec -i supabase_db_recherche-dirigeants-demo \
-  psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - \
-  < supabase/tests/central_cache.sql
-uv run --with 'psycopg[binary]' python supabase/tests/concurrency.py
+npm run test:postgres
 ```
 
-Arrêter ensuite la stack locale :
+Ce test couvre notamment la réservation SQL et l’identité faible/forte dans les deux ordres, dans un même batch et entre batches. Il ne constitue pas un E2E Neon : tant que la migration et les parcours applicatifs n’ont pas été exécutés contre une instance Neon autorisée, aucun test E2E Neon n’est revendiqué.
+
+## Base neuve Neon
+
+Dans le projet Vercel : **Vercel Marketplace → Neon**, puis créer une base neuve. La base commune neuve démarre vide.
+
+Définir dans Vercel, pour les environnements voulus :
+
+- `DATABASE_URL` fourni par Neon (connexion poolée recommandée pour la Function) ;
+- `DIRECTOR_FINGERPRINT_SALT`, valeur aléatoire stable ;
+- `RATE_LIMIT_SALT`, autre valeur aléatoire stable.
+
+Ne jamais exposer ces variables au frontend ni les préfixer par `VITE_`/`NEXT_PUBLIC_`.
+
+Appliquer le schéma depuis un environnement local autorisé ayant `DATABASE_URL` :
 
 ```bash
-npx supabase stop --no-backup
+npm run db:migrate
 ```
 
-## Déploiement Supabase
+La migration fraîche est `db/migrations/001_initial.sql`. Elle utilise PostgreSQL standard et les fonctions PL/pgSQL de Neon. Elle préserve cache, leases, limite globale, scans, leads, ledger atomique et historique commun.
 
-Cette étape nécessite un projet Supabase et une authentification CLI. Ne jamais commiter le fichier de secrets. Tant que `src/central-config.js` reste vide, l’artefact GitHub Pages fonctionne volontairement en mode direct et ne possède pas d’anti-doublon partagé.
+## Déploiement Vercel
+
+Après avoir relié le dépôt privé et configuré Neon/les variables :
 
 ```bash
-npx supabase login
-npx supabase link --project-ref <PROJECT_REF>
-npx supabase db push --dry-run
-npx supabase db push
-cp supabase/functions/.env.example supabase/.env.production.local
-# Remplacer les deux sels et ALLOWED_ORIGINS dans ce fichier ignoré par Git.
-npx supabase secrets set --env-file supabase/.env.production.local
-npx supabase functions deploy scan
+vercel
+# puis, lorsque la mise en production est autorisée :
+vercel --prod
 ```
 
-Puis renseigner dans `src/central-config.js` uniquement les deux valeurs publiques :
+Vercel sert les fichiers statiques par son filesystem et interprète uniquement `api/scan.js` comme Function Node. La logique serveur et le client PostgreSQL lazy/singleton sont sous `server/`. Aucun secret ou identifiant de projet n’est stocké dans le dépôt.
 
-```js
-export const centralConfig = Object.freeze({
-  url: 'https://<PROJECT_REF>.supabase.co',
-  publicKey: '<SUPABASE_ANON_KEY>',
-});
-```
+## Rollback
 
-La clé publique/anon sert uniquement à invoquer l’Edge Function depuis le navigateur. Les tables restent révoquées pour `anon` et `authenticated`, avec RLS activé. La clé `service_role` reste un secret injecté automatiquement dans l’Edge Function.
+L’ancien projet et l’ancien déploiement Supabase restent **intacts et non modifiés** dans leur environnement distant. Le rollback consiste à réorienter les utilisateurs vers cet ancien déploiement. Le dossier `legacy/supabase/` est conservé uniquement comme archive locale hors runtime Vercel ; il ne doit pas être déployé ni utilisé par le nouveau frontend.
 
-## Données et limites
+## Limites des données
 
-Les données viennent de sources administratives publiques. Leur couverture et leur qualité ne sont pas garanties. L’âge est estimé depuis la date ou l’année de naissance publiée. Les tranches d’effectif rendent le filtre approximatif. Un cache sans rafraîchissement automatique peut devenir ancien ; un rafraîchissement administratif explicite devra être ajouté avant usage métier durable.
-
-L’indice de personne morale signale seulement qu’un dirigeant personne morale hors commissaire aux comptes est fourni par l’API. Ce n’est pas une preuve d’actionnariat ni de contrôle capitalistique.
+Les données sont administratives et publiques, avec une couverture non garantie. L’empreinte de dirigeant est une heuristique administrative, pas une identité civile. Le cache n’expire pas automatiquement ; un rafraîchissement devra être décidé explicitement.

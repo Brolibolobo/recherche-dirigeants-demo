@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { edgeErrorStatus } from '../supabase/functions/_shared/http-errors.js';
+import { edgeErrorStatus } from '../server/lib/http-errors.js';
 
 test('les erreurs client de l’Edge Function répondent 400', () => {
   assert.equal(edgeErrorStatus(new SyntaxError('JSON invalide')), 400);
@@ -15,5 +15,6 @@ test('les erreurs client de l’Edge Function répondent 400', () => {
 test('les erreurs CORS et serveur gardent leur statut', () => {
   assert.equal(edgeErrorStatus(new Error('origin_not_allowed')), 403);
   assert.equal(edgeErrorStatus(new Error('request_too_large')), 413);
+  assert.equal(edgeErrorStatus(new Error('server_busy')), 503);
   assert.equal(edgeErrorStatus(new Error('cache_write:database down')), 500);
 });

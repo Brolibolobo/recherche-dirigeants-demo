@@ -49,8 +49,8 @@ test('l’application gère les APE sélectionnés et démarre les secteurs dés
 test('l’application utilise le scan central et transmet le mode choisi', () => {
   assert.match(app, /isCentralConfigured/);
   assert.match(app, /scanCentral/);
-  assert.match(app, /buildReferenceRows/);
-  assert.match(app, /sans anti-doublon partagé/);
+  assert.match(app, /Mode central : base commune active/);
+  assert.doesNotMatch(app, /mode direct|sans anti-doublon partagé/i);
   assert.match(app, /scanCentral\(\{[\s\S]*?\bmode[,|:]/);
 });
 

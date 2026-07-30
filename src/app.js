@@ -1,4 +1,3 @@
-import { fetchSearchPage, buildSearchUrl } from './api.js';
 import { SECTORS, LEGALS, parseNafCodes, validateFilterInputs, clampMaxRows, staffCodes, geoParamsForZones, findActiveMatchingEstablishment, buildReferenceRows, companyIsEligible, sortNamedEntries, postalZoneFromQuery, appendCompatibleZone } from './filters.js';
 import { DEPARTMENTS, REGIONS } from './geo-data.js';
 import { downloadCsv } from './csv.js';
@@ -158,8 +157,8 @@ function currentFilters() {
     nafCodes: parseNafCodes(selectedNafCodes),
     sectors: selected('sectors'),
     legal: legal.length ? legal : LEGALS.map(([key]) => key),
-    staffMin: $('staffMin').value,
-    staffMax: $('staffMax').value,
+    staffMin: Number($('staffMin').value),
+    staffMax: Number($('staffMax').value),
     staffCodes: staffCodes($('staffMin').value, $('staffMax').value),
     ageMin: Number($('ageMin').value),
     ageMax: Number($('ageMax').value),
@@ -231,32 +230,6 @@ function setMode(nextMode) {
   render();
 }
 
-async function runDirect(filters) {
-  const hasGeo = Object.keys(filters.geoParams).length > 0;
-  for (let page = 1; rows.length < filters.maxRows; page++) {
-    status(`Mode direct · page ${page} · ${rows.length}/${filters.maxRows}`);
-    const data = await fetchSearchPage({ page, filters }, { signal: aborter.signal });
-    const results = data.results || [];
-    if (!results.length) break;
-    for (const company of results) {
-      if (!companyIsEligible(company, filters.legal)) continue;
-      const matchedEstablishment = hasGeo ? findActiveMatchingEstablishment(company) : null;
-      if (hasGeo && !matchedEstablishment) continue;
-      const code = company.activite_principale || '';
-      const candidates = buildReferenceRows(company, {
-        apeLabel: naf[code] || '', sourceUrl: buildSearchUrl({ page, filters }), ageMin: filters.ageMin, ageMax: filters.ageMax, matchedEstablishment,
-      });
-      for (const candidate of candidates) {
-        rows.push(candidate);
-        if (rows.length >= filters.maxRows) break;
-      }
-      if (rows.length >= filters.maxRows) break;
-    }
-    render();
-    if (page >= (data.total_pages || page)) break;
-  }
-}
-
 async function run() {
   let filters;
   try { filters = currentFilters(); } catch (error) { return status(error.message, true); }
@@ -269,11 +242,20 @@ async function run() {
   setLoading(true);
   status('Recherche en cours…');
   try {
-    if (isCentralConfigured()) {
-      const result = await scanCentral({
+    const serverFilters = {
+      zones: filters.zones,
+      nafCodes: filters.nafCodes,
+      sectors: filters.sectors,
+      legal: filters.legal,
+      staffMin: filters.staffMin,
+      staffMax: filters.staffMax,
+      ageMin: filters.ageMin,
+      ageMax: filters.ageMax,
+    };
+    const result = await scanCentral({
         mode,
         query: mode === 'history' ? $('historyQuery').value.trim() : '',
-        filters,
+        filters: serverFilters,
         target: filters.maxRows,
       }, { signal: aborter.signal });
       rows = result.rows;
@@ -284,10 +266,6 @@ async function run() {
       } else {
         const collected = cache.oldest_collected_at ? ` · données collectées depuis le ${new Date(cache.oldest_collected_at).toLocaleString('fr-FR')}` : '';
         status(`${result.partial ? 'Résultat partiel' : 'Terminé'} : ${rows.length} nouveau(x) dirigeant(s) · ${cache.stored_rows || 0} depuis la base · ${cache.hit_pages || 0} page(s) en cache · ${cache.fetched_pages || 0} page(s) API${collected}${result.warning ? ` · ${result.warning}` : ''}`, Boolean(result.partial));
-      }
-    } else {
-      await runDirect(filters);
-      status(`Terminé : ${rows.length} dirigeant(s). Cache central non configuré : mode direct, sans anti-doublon partagé.`);
     }
     await saveSnapshot({ rows, filters, mode, savedAt: new Date().toISOString() });
   } catch (error) {
@@ -355,7 +333,7 @@ async function init() {
     });
     renderNafSelection();
     renderZoneSelection();
-    status(`${Object.keys(naf).length} codes APE chargés. ${isCentralConfigured() ? 'Base centrale active.' : 'Mode direct : base centrale non configurée.'}`);
+    status(`${Object.keys(naf).length} codes APE chargés. Mode central : base commune active.`);
   } catch (error) {
     status(`Initialisation incomplète : ${error.message}`, true);
   }

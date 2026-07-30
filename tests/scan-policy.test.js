@@ -9,8 +9,8 @@ import {
   readJsonWithLimit,
   sanitizeScanFilters,
   validateUpstreamPayload,
-} from '../supabase/functions/_shared/scan-policy.js';
-import { LEGALS, SECTORS, referenceRowMatchesFilters } from '../supabase/functions/_shared/filters.js';
+} from '../server/lib/scan-policy.js';
+import { LEGALS, SECTORS, referenceRowMatchesFilters } from '../server/lib/filters.js';
 
 test('la politique MVP borne coût, pages, deadline et corps HTTP', () => {
   assert.equal(MAX_SCAN_TARGET, 100);
@@ -33,8 +33,8 @@ test('les zones structurées sont validées puis converties en une liste de dép
   const filters = sanitizeScanFilters({
     sectors: ['N'],
     zones: [
-      { type: 'departement', code: '75', label: 'texte navigateur ignoré' },
-      { type: 'region', code: '11', label: 'texte navigateur ignoré' },
+      { type: 'departement', code: '75' },
+      { type: 'region', code: '11' },
     ],
   });
   assert.deepEqual(filters.zones, [
@@ -43,6 +43,7 @@ test('les zones structurées sont validées puis converties en une liste de dép
   ]);
   assert.deepEqual(filters.geoParams, { departement: '75,77,78,91,92,93,94,95' });
   assert.throws(() => sanitizeScanFilters({ sectors: ['N'], zones: [{ type: 'pays', code: 'FR' }] }), /invalid_zones/);
+  assert.throws(() => sanitizeScanFilters({ sectors: ['N'], zones: [{ type: 'departement', code: '75', label: 'non autorisé' }] }), /invalid_zones/);
 });
 
 test('les zones structurées acceptent les codes postaux exacts', () => {
@@ -78,8 +79,56 @@ test('les anciens filtres geo restent appliqués au stock et à l’historique',
 
 test('le contrat upstream rejette les structures non itérables et pages invalides', () => {
   assert.throws(() => validateUpstreamPayload({ total_pages: 'inconnu', results: [] }, 1), /upstream_invalid_payload/);
+  for (const totalPages of [null, false, [], '1']) {
+    assert.throws(() => validateUpstreamPayload({ total_pages: totalPages, results: [] }, 1), /upstream_invalid_payload/);
+  }
   assert.throws(() => validateUpstreamPayload({ total_pages: 2, results: {} }, 1), /upstream_invalid_payload/);
+  assert.throws(() => validateUpstreamPayload({ total_pages: 1, results: [null] }, 1), /upstream_invalid_payload/);
+  assert.throws(() => validateUpstreamPayload({ total_pages: 1, results: [{ dirigeants: {} }] }, 1), /upstream_invalid_payload/);
+  assert.throws(() => validateUpstreamPayload({ total_pages: 1, results: [{ matching_etablissements: [null] }] }, 1), /upstream_invalid_payload/);
   assert.deepEqual(validateUpstreamPayload({ total_pages: 2, results: [] }, 1), { totalPages: 2, results: [] });
+});
+
+test('le contrat upstream valide exhaustivement les scalaires consommés à chaque niveau', () => {
+  const trapped = { toString: null, valueOf: null };
+  const stringFields = {
+    company: [
+      'activite_principale', 'categorie_entreprise', 'etat_administratif', 'nature_juridique',
+      'nom_complet', 'nom_raison_sociale', 'section_activite_principale', 'siren', 'tranche_effectif_salarie',
+    ],
+    siege: ['adresse', 'code_postal', 'commune', 'date_fermeture', 'etat_administratif', 'libelle_commune', 'siret'],
+    director: [
+      'annee_de_naissance', 'date_de_naissance', 'denomination', 'nationalite', 'nom',
+      'nom_complet', 'prenoms', 'qualite', 'siren', 'type_dirigeant',
+    ],
+    establishment: ['adresse', 'code_postal', 'commune', 'date_fermeture', 'etat_administratif', 'libelle_commune', 'siret'],
+  };
+  const companyFor = (scope, field, value = trapped) => {
+    if (scope === 'company') return { [field]: value };
+    if (scope === 'siege') return { siege: { [field]: value } };
+    if (scope === 'director') return { dirigeants: [{ [field]: value }] };
+    return { matching_etablissements: [{ [field]: value }] };
+  };
+
+  for (const [scope, fields] of Object.entries(stringFields)) {
+    for (const field of fields) {
+      assert.throws(
+        () => validateUpstreamPayload({ total_pages: 1, results: [companyFor(scope, field)] }, 1),
+        /upstream_invalid_payload/,
+        `${scope}.${field}`,
+      );
+    }
+  }
+  for (const value of [[], () => {}]) {
+    assert.throws(() => validateUpstreamPayload({ total_pages: 1, results: [{ nature_juridique: value }] }, 1), /upstream_invalid_payload/);
+  }
+  for (const value of [trapped, '2', 1.5, -1]) {
+    assert.throws(() => validateUpstreamPayload({ total_pages: 1, results: [{ nombre_etablissements_ouverts: value }] }, 1), /upstream_invalid_payload/);
+  }
+  assert.doesNotThrow(() => validateUpstreamPayload({
+    total_pages: 1,
+    results: [{ champ_non_consomme: { libre: ['de', 'rester', 'structuré'] } }],
+  }, 1));
 });
 
 test('le lecteur JSON refuse le corps réel au-delà de 16 KiB', async () => {
@@ -98,8 +147,9 @@ test('le lecteur JSON refuse le corps réel au-delà de 16 KiB', async () => {
 });
 
 test('les erreurs internes deviennent des codes publics stables', () => {
-  assert.equal(publicErrorCode(new Error('reserve_leads:relation scans indisponible')), 'reservation_failed');
-  assert.equal(publicErrorCode(new Error('cache_read:SQL interne')), 'cache_read_failed');
-  assert.equal(publicErrorCode(new Error('inconnu sensible')), 'internal_error');
+  assert.equal(publicErrorCode(new Error('reserve_leads:relation scans indisponible')), 'server_error');
+  assert.equal(publicErrorCode(new Error('cache_read:SQL interne')), 'server_error');
+  assert.equal(publicErrorCode(new Error('inconnu sensible')), 'server_error');
   assert.equal(publicErrorCode(new Error('invalid_target')), 'invalid_target');
+  assert.equal(publicErrorCode(new Error('server_busy')), 'server_busy');
 });

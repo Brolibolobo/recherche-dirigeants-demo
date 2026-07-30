@@ -1,4 +1,4 @@
-import { API_URL, buildSearchParams, buildSearchUrl, retryAfterDelay } from '../supabase/functions/_shared/api-core.js';
+import { API_URL, buildSearchParams, buildSearchUrl, retryAfterDelay } from '../server/lib/api-core.js';
 
 export { API_URL, buildSearchParams, buildSearchUrl, retryAfterDelay };
 export const RATE_LIMIT_PER_SECOND = 6;

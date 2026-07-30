@@ -1,0 +1,4 @@
+legacy/
+tests/
+node_modules/
+.git/
