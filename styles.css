@@ -15,9 +15,7 @@ body { margin: 0; color: var(--ink); background: var(--canvas); font: 15px/1.5 s
 button, input { font: inherit; }
 button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid color-mix(in srgb, var(--focus) 28%, transparent); outline-offset: 2px; }
 .wrap { width: min(1160px, calc(100% - 32px)); margin: auto; }
-header { background: var(--surface); border-bottom: 1px solid var(--line); }
-header .wrap { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-header span, small, .mode-help { color: var(--muted); }
+small, .mode-help { color: var(--muted); }
 .hero { padding: 46px 0 24px; }
 h1 { max-width: 18ch; margin: 0; font-size: 3rem; line-height: 1.04; letter-spacing: -.03em; text-wrap: balance; }
 .panel { margin-bottom: 24px; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
@@ -74,7 +72,6 @@ table { width: 100%; min-width: 850px; border-collapse: collapse; }
 th, td { padding: 12px; vertical-align: top; text-align: left; border-top: 1px solid var(--line); }
 th { font-size: 13px; }
 .empty { padding: 34px; color: var(--muted); text-align: center; }
-.notice { max-width: 80ch; padding-bottom: 50px; color: #4f5660; }
 [hidden] { display: none !important; }
 @media (max-width: 800px) {
   .form { grid-template-columns: 1fr; }
@@ -83,7 +80,6 @@ th { font-size: 13px; }
   .mode-switch button, .picker-summary button { min-height: 44px; }
   .picker-option, .value-tag, .technical-details summary { min-height: 44px; }
   h1 { font-size: 2.35rem; }
-  header span { display: none; }
   .search-progress { grid-template-columns: 64px 1fr; }
   .search-progress time { grid-column: 2; text-align: left; }
 }

@@ -116,6 +116,7 @@ export function sanitizeScanFilters(input = {}, { allowEmptyActivity = false } =
         const code = String(zone.code || '').toUpperCase();
         if (type === 'departement' && departmentCodes.has(code)) return { type, code };
         if (type === 'region' && regionCodes.has(code)) return { type, code };
+        if (type === 'code_postal' && /^\d{5}$/.test(code)) return { type, code };
         throw new Error('invalid_zones');
       });
       zones = zones.filter((zone, index) => zones.findIndex(item => item.type === zone.type && item.code === zone.code) === index);

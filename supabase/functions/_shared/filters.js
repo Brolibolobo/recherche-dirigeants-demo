@@ -4,6 +4,25 @@ export const SECTORS = [['C','Industrie'],['F','Construction'],['G','Commerce'],
 export const LEGALS = [['sas','SAS'],['sarl','SARL'],['sa','SA']];
 export const LEGAL_CODES = { sas: ['5710','5720'], sarl: ['5498','5499'], sa: ['5505','5510','5520','5599'] };
 const STAFF = [['00',0,0],['01',1,2],['02',3,5],['03',6,9],['11',10,19],['12',20,49],['21',50,99],['22',100,199],['31',200,249],['32',250,499],['41',500,999],['42',1000,1999],['51',2000,4999],['52',5000,Infinity]];
+const FRENCH_LABELS = new Intl.Collator('fr', { sensitivity: 'base' });
+
+export function sortNamedEntries(entries = []) {
+  return [...entries].sort((left, right) => FRENCH_LABELS.compare(String(left?.[1] || ''), String(right?.[1] || '')));
+}
+
+export function postalZoneFromQuery(value) {
+  const code = String(value || '').trim();
+  return /^\d{5}$/.test(code)
+    ? { key: `code_postal:${code}`, type: 'code_postal', code, label: `${code} · Code postal` }
+    : null;
+}
+
+export function appendCompatibleZone(zones = [], zone) {
+  if (!zone?.key) return [...zones];
+  const exactPostal = zone.type === 'code_postal';
+  const compatible = zones.filter(item => (item.type === 'code_postal') === exactPostal);
+  return compatible.some(item => item.key === zone.key) ? compatible : [...compatible, zone];
+}
 
 export function parseGeo(value) {
   const raw = String(value || '').trim();
@@ -17,14 +36,21 @@ export function parseGeo(value) {
 
 export function geoParamsForZones(zones = []) {
   const departments = [];
+  const postals = [];
   for (const zone of Array.isArray(zones) ? zones : []) {
     const type = String(zone?.type || '');
     const code = String(zone?.code || '').toUpperCase();
     if (type === 'departement' && /^(?:\d{2,3}|2[AB])$/.test(code)) departments.push(code);
     if (type === 'region') departments.push(...(REGION_DEPARTMENTS[code] || []));
+    if (type === 'code_postal' && /^\d{5}$/.test(code)) postals.push(code);
   }
-  const unique = [...new Set(departments)];
-  return unique.length ? { departement: unique.join(',') } : {};
+  const uniqueDepartments = [...new Set(departments)];
+  const uniquePostals = [...new Set(postals)];
+  if (uniqueDepartments.length && uniquePostals.length) {
+    throw new Error('Choisissez des zones du même niveau géographique.');
+  }
+  if (uniquePostals.length) return { code_postal: uniquePostals.join(',') };
+  return uniqueDepartments.length ? { departement: uniqueDepartments.join(',') } : {};
 }
 
 export function parseNafCode(value) {
@@ -132,8 +158,11 @@ export function referenceRowMatchesFilters(row, filters = {}, query = '') {
     const rowDepartments = rowPostals.flatMap(postalDepartments);
     if (!rowDepartments.some(code => allowedDepartments.includes(code))) return false;
   }
-  const requiredPostal = String(normalizedGeo.code_postal || '').replace(/\D/g, '');
-  if (requiredPostal && !rowPostals.includes(requiredPostal)) return false;
+  const requiredPostals = String(normalizedGeo.code_postal || '')
+    .split(',')
+    .map(value => value.replace(/\D/g, ''))
+    .filter(Boolean);
+  if (requiredPostals.length && !rowPostals.some(postal => requiredPostals.includes(postal))) return false;
   const terms = normalizedSearch(query).split(' ').filter(Boolean);
   if (terms.length) {
     const haystack = normalizedSearch([

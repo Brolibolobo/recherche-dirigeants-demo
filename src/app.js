@@ -1,5 +1,5 @@
 import { fetchSearchPage, buildSearchUrl } from './api.js';
-import { SECTORS, LEGALS, parseNafCodes, validateFilterInputs, clampMaxRows, staffCodes, geoParamsForZones, findActiveMatchingEstablishment, buildReferenceRows, companyIsEligible } from './filters.js';
+import { SECTORS, LEGALS, parseNafCodes, validateFilterInputs, clampMaxRows, staffCodes, geoParamsForZones, findActiveMatchingEstablishment, buildReferenceRows, companyIsEligible, sortNamedEntries, postalZoneFromQuery, appendCompatibleZone } from './filters.js';
 import { DEPARTMENTS, REGIONS } from './geo-data.js';
 import { downloadCsv } from './csv.js';
 import { saveSnapshot, loadLastSnapshot } from './storage.js';
@@ -35,8 +35,9 @@ function createPicker({ inputId, optionsId, items, isSelected, choose }) {
   const input = $(inputId);
   const options = $(optionsId);
   const visibleItems = () => {
-    const query = normalize(input.value.trim());
-    return items().filter(item => !query || normalize(`${item.code} ${item.label} ${item.search || ''}`).includes(query)).slice(0, 100);
+    const rawQuery = input.value.trim();
+    const query = normalize(rawQuery);
+    return items(rawQuery).filter(item => !query || normalize(`${item.code} ${item.label} ${item.search || ''}`).includes(query)).slice(0, 100);
   };
   const render = () => {
     const scrollTop = options.scrollTop;
@@ -326,22 +327,29 @@ async function init() {
     });
     nafPicker = createPicker({
       inputId: 'naf', optionsId: 'nafOptions',
-      items: () => Object.entries(naf).map(([code, label]) => ({ code, label: `${code} · ${label}`, search: aliases[code] || '' })),
+      items: () => sortNamedEntries(Object.entries(naf)).map(([code, label]) => ({ code, label: `${code} · ${label}`, search: aliases[code] || '' })),
       isSelected: item => selectedNafCodes.includes(item.code),
       choose: item => {
         if (!selectedNafCodes.includes(item.code)) selectedNafCodes.push(item.code);
         renderNafSelection();
       },
     });
-    const zoneItems = [
-      ...REGIONS.map(([code, label]) => ({ key: `region:${code}`, type: 'region', code, label: `${label} · Région` })),
-      ...DEPARTMENTS.map(([code, label]) => ({ key: `departement:${code}`, type: 'departement', code, label: `${label} (${code}) · Département` })),
+    const zoneEntries = [
+      ...sortNamedEntries(REGIONS).map(([code, label]) => [code, label, 'region']),
+      ...sortNamedEntries(DEPARTMENTS).map(([code, label]) => [code, label, 'departement']),
     ];
+    const zoneItems = sortNamedEntries(zoneEntries).map(([code, label, type]) => ({
+      key: `${type}:${code}`,
+      type,
+      code,
+      label: type === 'region' ? `${label} · Région` : `${label} (${code}) · Département`,
+    }));
     zonePicker = createPicker({
-      inputId: 'zone', optionsId: 'zoneOptions', items: () => zoneItems,
+      inputId: 'zone', optionsId: 'zoneOptions',
+      items: query => [postalZoneFromQuery(query), ...zoneItems].filter(Boolean),
       isSelected: item => selectedZones.some(zone => zone.key === item.key),
       choose: item => {
-        if (!selectedZones.some(zone => zone.key === item.key)) selectedZones.push(item);
+        selectedZones = appendCompatibleZone(selectedZones, item);
         renderZoneSelection();
       },
     });

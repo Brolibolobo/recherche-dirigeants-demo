@@ -11,6 +11,9 @@ import {
   buildReferenceRow,
   buildReferenceRows,
   referenceRowMatchesFilters,
+  sortNamedEntries,
+  postalZoneFromQuery,
+  appendCompatibleZone,
 } from '../src/filters.js';
 
 const company = {
@@ -178,4 +181,52 @@ test('le filtre géographique accepte le siège même si un établissement de zo
     zones: [{ type: 'departement', code: '75', label: 'Paris (75)' }],
   };
   assert.equal(referenceRowMatchesFilters(row, filters), true);
+});
+
+test('les codes postaux exacts restent exacts et peuvent être combinés entre eux', () => {
+  assert.deepEqual(geoParamsForZones([
+    { type: 'code_postal', code: '75016' },
+    { type: 'code_postal', code: '75017' },
+  ]), { code_postal: '75016,75017' });
+  assert.throws(() => geoParamsForZones([
+    { type: 'departement', code: '75' },
+    { type: 'code_postal', code: '75016' },
+  ]), /même niveau géographique/i);
+});
+
+test('la saisie 75016 crée un choix postal et remplace les zones larges', () => {
+  const postal = postalZoneFromQuery(' 75016 ');
+  assert.deepEqual(postal, {
+    key: 'code_postal:75016', type: 'code_postal', code: '75016', label: '75016 · Code postal',
+  });
+  assert.equal(postalZoneFromQuery('Paris'), null);
+  assert.deepEqual(
+    appendCompatibleZone([{ key: 'departement:75', type: 'departement', code: '75' }], postal),
+    [postal],
+  );
+  assert.deepEqual(
+    appendCompatibleZone([postal], { key: 'code_postal:75017', type: 'code_postal', code: '75017' }),
+    [postal, { key: 'code_postal:75017', type: 'code_postal', code: '75017' }],
+  );
+});
+
+test('les listes nommées sont triées sur leur libellé français, pas sur leur code', () => {
+  assert.deepEqual(sortNamedEntries([
+    ['01', 'Zoologie'], ['99', 'Abattage'], ['50', 'Élevage'],
+  ]), [
+    ['99', 'Abattage'], ['50', 'Élevage'], ['01', 'Zoologie'],
+  ]);
+});
+
+test('le filtre postal exact accepte 75016 et refuse les autres codes', () => {
+  const base = {
+    code_ape: '81.21Z', secteur: 'N', tranche_effectif: '11', nature_juridique: '5710', dirigeant_age: 40,
+    code_postal_etablissement_zone: '75016', code_postal_siege: '75001',
+  };
+  const filters = {
+    nafCodes: ['81.21Z'], staffCodes: ['11'], legal: ['sas'], ageMin: 25, ageMax: 75,
+    zones: [{ type: 'code_postal', code: '75016' }],
+  };
+  assert.equal(referenceRowMatchesFilters(base, filters), true);
+  assert.equal(referenceRowMatchesFilters({ ...base, code_postal_etablissement_zone: '75015' }, filters), false);
 });

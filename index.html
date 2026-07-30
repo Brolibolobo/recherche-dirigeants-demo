@@ -8,10 +8,6 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <header>
-    <div class="wrap"><strong>Recherche dirigeants</strong><span>Base partagée · Export CSV</span></div>
-  </header>
-
   <main class="wrap">
     <section class="hero"><h1>Trouver des sociétés et leurs dirigeants.</h1></section>
 
@@ -31,10 +27,10 @@
       <div class="picker-field zone-field">
         <label for="zone">Zones</label>
         <div class="picker-shell">
-          <input id="zone" type="search" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="zoneOptions" placeholder="Tapez Paris, Bretagne ou 75">
+          <input id="zone" type="search" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="zoneOptions" placeholder="Tapez Paris, Bretagne, 75 ou 75016">
           <div id="zoneOptions" class="picker-options" role="listbox" hidden></div>
         </div>
-        <small>Ajoutez plusieurs départements ou régions. Ils sont combinés en OU.</small>
+        <small>Ajoutez plusieurs régions ou départements, ou plusieurs codes postaux exacts. Changer de niveau remplace la sélection.</small>
         <div class="picker-summary"><span id="zoneCount">France entière</span><button id="clearZones" type="button" disabled>Effacer les zones</button></div>
         <div id="selectedZones" class="selected-values" aria-live="polite"></div>
       </div>
@@ -84,8 +80,6 @@
       <div class="result-head"><div><h2>Résultats</h2><p id="count">0 ligne</p></div><label>Lignes affichées<input id="previewLimit" type="number" min="5" max="200" value="50"></label></div>
       <div id="preview" class="table-wrap"><p class="empty">Lancez une recherche pour afficher des dirigeants.</p></div>
     </section>
-
-    <p class="notice"><strong>Groupement capitalistique :</strong> la présence d’un dirigeant personne morale est affichée uniquement comme un indice prudent, avec son nom, SIREN et qualité. Ce n’est <strong>pas une preuve d’actionnariat</strong>.</p>
   </main>
   <script type="module" src="./src/app.js"></script>
 </body>

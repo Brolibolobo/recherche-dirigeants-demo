@@ -45,6 +45,21 @@ test('les zones structurées sont validées puis converties en une liste de dép
   assert.throws(() => sanitizeScanFilters({ sectors: ['N'], zones: [{ type: 'pays', code: 'FR' }] }), /invalid_zones/);
 });
 
+test('les zones structurées acceptent les codes postaux exacts', () => {
+  const filters = sanitizeScanFilters({
+    sectors: ['N'],
+    zones: [
+      { type: 'code_postal', code: '75016' },
+      { type: 'code_postal', code: '75017' },
+    ],
+  });
+  assert.deepEqual(filters.zones, [
+    { type: 'code_postal', code: '75016' },
+    { type: 'code_postal', code: '75017' },
+  ]);
+  assert.deepEqual(filters.geoParams, { code_postal: '75016,75017' });
+});
+
 test('les anciens filtres geo restent appliqués au stock et à l’historique', () => {
   const base = {
     code_ape: '81.21Z', secteur: 'N', tranche_effectif: '11', nature_juridique: '5710', dirigeant_age: 40,

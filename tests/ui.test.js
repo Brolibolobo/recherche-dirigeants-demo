@@ -26,6 +26,20 @@ test('l’interface expose zones lisibles, deux modes et chargement manager', ()
   assert.match(app, /setLoading/);
 });
 
+test('l’en-tête promotionnel et la notice de groupement sont retirés', () => {
+  assert.doesNotMatch(index, />Recherche dirigeants</);
+  assert.doesNotMatch(index, /Base partagée · Export CSV/);
+  assert.doesNotMatch(index, /Groupement capitalistique\s*:/);
+});
+
+test('les zones et activités sont triées par nom et le picker propose un code postal exact', () => {
+  assert.match(app, /sortNamedEntries\(Object\.entries\(naf\)\)/);
+  assert.match(app, /sortNamedEntries\(REGIONS\)/);
+  assert.match(app, /sortNamedEntries\(DEPARTMENTS\)/);
+  assert.match(app, /postalZoneFromQuery/);
+  assert.match(app, /appendCompatibleZone/);
+});
+
 test('l’application gère les APE sélectionnés et démarre les secteurs désactivés', () => {
   assert.match(app, /selectedNafCodes/);
   assert.match(app, /chips\('sectors',\s*SECTORS,\s*false\)/);
